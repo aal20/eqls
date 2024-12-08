@@ -1,0 +1,14 @@
+{
+  "name": "echoquery-workspace",
+  "version": "1.0.0",
+  "description": "Echo Query Language Server and Client",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "dev": "npm run dev --workspaces --parallel",
+    "start": "npm run start --workspaces --parallel"
+  }
+}
