@@ -67,13 +67,10 @@ export class EchoQueryServer {
                     documentSymbolProvider: true,
                     documentRangeFormattingProvider: true,
                     diagnosticProvider: {
-                        workspace: true,
-                        identifier: {
-                            propertyNames: ['owner']
-                        },
-                        codeActions: {
-                            workspace: true
-                        }
+                        documentSelector: [{ scheme: 'file', language: 'echo-query' }],
+                        interFileDependencies: false,
+                        workspaceDiagnostics: false,
+                        identifier: 'echo-query'
                     }
                 }
             };
