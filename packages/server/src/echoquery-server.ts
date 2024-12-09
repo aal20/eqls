@@ -11,6 +11,7 @@ import {
 } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import * as URI from 'vscode-uri';
+import { MessageConnection } from 'vscode-jsonrpc';
 
 export class EchoQueryServer {
     protected readonly connection: _Connection;
@@ -38,7 +39,7 @@ export class EchoQueryServer {
                 this.workspaceRoot = URI.URI.parse(params.rootUri);
             }
             
-            this.connection.console.log('The EchoQuery server is initialized.');
+            console.log('The EchoQuery server is initialized.');
             
             return {
                 capabilities: {
@@ -54,14 +55,14 @@ export class EchoQueryServer {
             };
         });
 
-        this.connection.onCompletion(params => this.completion(params));
-        this.connection.onCompletionResolve(item => this.resolveCompletion(item));
-        this.connection.onHover(params => this.hover(params));
-        this.connection.onDocumentSymbol(params => this.findDocumentSymbols(params));
-        this.connection.onDocumentRangeFormatting(params => this.format(params));
+        this.connection.onRequest('textDocument/completion', (params: any) => this.completion(params));
+        this.connection.onRequest('completionItem/resolve', (item: any) => this.resolveCompletion(item));
+        this.connection.onRequest('textDocument/hover', (params: any) => this.hover(params));
+        this.connection.onRequest('textDocument/documentSymbol', (params: any) => this.findDocumentSymbols(params));
+        this.connection.onRequest('textDocument/rangeFormatting', (params: any) => this.format(params));
     }
 
-    start(): void {
+    public start(): void {
         this.connection.listen();
     }
 
@@ -74,7 +75,10 @@ export class EchoQueryServer {
     }
 
     protected cleanDiagnostics(textDocument: TextDocument): void {
-        this.connection.sendDiagnostics({ uri: textDocument.uri, diagnostics: [] });
+        this.connection.sendNotification('textDocument/publishDiagnostics', {
+            uri: textDocument.uri,
+            diagnostics: []
+        });
     }
 
     protected validate(textDocument: TextDocument): void {
@@ -87,7 +91,102 @@ export class EchoQueryServer {
 
     protected doValidate(textDocument: TextDocument): void {
         const diagnostics: Diagnostic[] = [];
-        this.connection.sendDiagnostics({ uri: textDocument.uri, diagnostics });
+        const text = textDocument.getText();
+        const lines = text.split('\n');
+
+        // Check each line for syntax errors
+        lines.forEach((line, lineIndex) => {
+            const trimmedLine = line.trim();
+            if (trimmedLine === '' || trimmedLine.startsWith('//')) {
+                return; // Skip empty lines and comments
+            }
+
+            // Check for valid keywords at start of line
+            const validStartKeywords = ['INDEX', 'FILTER', 'MAP', 'AS', 'SQL', 'JOIN'];
+            const firstWord = trimmedLine.split(' ')[0].toUpperCase();
+            
+            if (!validStartKeywords.includes(firstWord)) {
+                diagnostics.push({
+                    severity: 1, // Error
+                    range: {
+                        start: { line: lineIndex, character: 0 },
+                        end: { line: lineIndex, character: firstWord.length }
+                    },
+                    message: `Line must start with one of: ${validStartKeywords.join(', ')}`,
+                    source: 'Echo Query'
+                });
+            }
+
+            // Check for INDEX statement format
+            if (firstWord === 'INDEX') {
+                const parts = trimmedLine.split(' ');
+                if (parts.length < 2) {
+                    diagnostics.push({
+                        severity: 1,
+                        range: {
+                            start: { line: lineIndex, character: 0 },
+                            end: { line: lineIndex, character: line.length }
+                        },
+                        message: 'INDEX statement must be followed by an index name',
+                        source: 'Echo Query'
+                    });
+                }
+            }
+
+            // Check for FILTER statement format
+            if (firstWord === 'FILTER') {
+                const hasCondition = trimmedLine.includes('>') || 
+                                   trimmedLine.includes('<') || 
+                                   trimmedLine.includes('=') ||
+                                   trimmedLine.includes('!=');
+                
+                if (!hasCondition) {
+                    diagnostics.push({
+                        severity: 1,
+                        range: {
+                            start: { line: lineIndex, character: 0 },
+                            end: { line: lineIndex, character: line.length }
+                        },
+                        message: 'FILTER must include a comparison operator (>, <, =, !=)',
+                        source: 'Echo Query'
+                    });
+                }
+            }
+
+            // Check for MAP statement format
+            if (firstWord === 'MAP') {
+                if (!trimmedLine.includes('AS') && !trimmedLine.includes('.')) {
+                    diagnostics.push({
+                        severity: 2, // Warning
+                        range: {
+                            start: { line: lineIndex, character: 0 },
+                            end: { line: lineIndex, character: line.length }
+                        },
+                        message: 'MAP statement should typically include field paths (using dots) or AS keyword',
+                        source: 'Echo Query'
+                    });
+                }
+            }
+
+            // Check for unmatched quotes
+            const quoteCount = (trimmedLine.match(/"/g) || []).length;
+            if (quoteCount % 2 !== 0) {
+                diagnostics.push({
+                    severity: 1,
+                    range: {
+                        start: { line: lineIndex, character: 0 },
+                        end: { line: lineIndex, character: line.length }
+                    },
+                    message: 'Unmatched quotes in line',
+                    source: 'Echo Query'
+                });
+            }
+        });
+
+        this.connection.sendNotification('textDocument/publishDiagnostics', {
+            uri: textDocument.uri,
+            diagnostics
+        });
     }
 
     protected completion(params: TextDocumentPositionParams): CompletionList {
