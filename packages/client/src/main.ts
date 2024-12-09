@@ -19,9 +19,8 @@ const editor = monaco.editor.create(document.getElementById('editor')!, {
   lineNumbers: 'on',
   glyphMargin: true,
   folding: true,
-  'editor.renderLineHighlight': 'all',
-  'editor.matchBrackets': 'always',
-  'editor.renderValidationDecorations': 'on'
+  renderLineHighlight: 'all',
+  matchBrackets: 'always'
 });
 
 // Configure editor markers
