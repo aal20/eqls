@@ -51,6 +51,16 @@ wss.on('connection', (ws) => {
     // Create LSP connection with proper features
     const connection = createConnection(ProposedFeatures.all, reader, writer);
 
+    // Add logging for all incoming messages
+    ws.on('message', (data) => {
+        console.log('Raw WebSocket message received:', data.toString());
+    });
+
+    // Add notification logging
+    connection.onNotification((method, params) => {
+        console.log('LSP notification received:', { method, params });
+    });
+
     // Create LSP server instance
     const server = new EchoQueryServer(connection);
     server.start();

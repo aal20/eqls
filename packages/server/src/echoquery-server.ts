@@ -21,18 +21,64 @@ export class EchoQueryServer {
 
     constructor(connection: _Connection) {
         this.connection = connection;
+        console.log('EchoQueryServer: Setting up document listener');
+        
+        // Listen for document lifecycle events
+        connection.onDidOpenTextDocument((params) => {
+            console.log('Document opened:', params.textDocument.uri);
+            const document = TextDocument.create(
+                params.textDocument.uri,
+                params.textDocument.languageId,
+                params.textDocument.version,
+                params.textDocument.text
+            );
+            this.documents.set(document);
+            this.validate(document);
+        });
+
+        connection.onDidChangeTextDocument((params) => {
+            console.log('Document changed:', params.textDocument.uri);
+            console.log('Changes:', params.contentChanges);
+            const document = this.documents.get(params.textDocument.uri);
+            if (!document) {
+                console.log('Creating new document');
+                const newDocument = TextDocument.create(
+                    params.textDocument.uri,
+                    'echo-query',
+                    params.textDocument.version,
+                    params.contentChanges[0].text
+                );
+                this.documents.set(newDocument);
+                this.validate(newDocument);
+            } else {
+                console.log('Updating existing document');
+                const newDocument = TextDocument.create(
+                    document.uri,
+                    document.languageId,
+                    params.textDocument.version,
+                    params.contentChanges[0].text
+                );
+                this.documents.set(newDocument);
+                this.validate(newDocument);
+            }
+        });
+
         this.documents.listen(this.connection);
         
-        this.documents.onDidChangeContent(change =>
+        this.documents.onDidChangeContent(change => {
+            console.log('Document content changed:', change.document.uri);
+            console.log('New content:', change.document.getText());
             this.validate(change.document)
-        );
+        });
         
         this.documents.onDidClose(event => {
+            console.log('Document closed:', event.document.uri);
             this.cleanPendingValidation(event.document);
             this.cleanDiagnostics(event.document);
         });
 
         this.connection.onInitialize(params => {
+            console.log('Initializing with params:', params);
             if (params.rootPath) {
                 this.workspaceRoot = URI.URI.file(params.rootPath);
             } else if (params.rootUri) {
@@ -43,14 +89,31 @@ export class EchoQueryServer {
             
             return {
                 capabilities: {
-                    textDocumentSync: TextDocumentSyncKind.Incremental,
+                    textDocumentSync: {
+                        openClose: true,
+                        change: TextDocumentSyncKind.Full,
+                        willSave: false,
+                        willSaveWaitUntil: false,
+                        save: {
+                            includeText: false
+                        }
+                    },
                     completionProvider: {
                         resolveProvider: true,
                         triggerCharacters: ['.', '@']
                     },
                     hoverProvider: true,
                     documentSymbolProvider: true,
-                    documentRangeFormattingProvider: true
+                    documentRangeFormattingProvider: true,
+                    diagnosticProvider: {
+                        workspace: true,
+                        identifier: {
+                            propertyNames: ['owner']
+                        },
+                        codeActions: {
+                            workspace: true
+                        }
+                    }
                 }
             };
         });
@@ -82,17 +145,19 @@ export class EchoQueryServer {
     }
 
     protected validate(textDocument: TextDocument): void {
+        console.log('Starting validation process for:', textDocument.uri);
         this.cleanPendingValidation(textDocument);
-        this.pendingValidationRequests.set(textDocument.uri, setTimeout(() => {
-            this.pendingValidationRequests.delete(textDocument.uri);
-            this.doValidate(textDocument);
-        }, 500));
+        // Perform validation immediately instead of with timeout
+        this.doValidate(textDocument);
     }
 
     protected doValidate(textDocument: TextDocument): void {
+        console.log('Performing validation for:', textDocument.uri);
         const diagnostics: Diagnostic[] = [];
         const text = textDocument.getText();
         const lines = text.split('\n');
+
+        console.log('Document text to validate:', text);
 
         // Check each line for syntax errors
         lines.forEach((line, lineIndex) => {
@@ -101,11 +166,16 @@ export class EchoQueryServer {
                 return; // Skip empty lines and comments
             }
 
+            console.log(`Validating line ${lineIndex}:`, trimmedLine);
+
             // Check for valid keywords at start of line
             const validStartKeywords = ['INDEX', 'FILTER', 'MAP', 'AS', 'SQL', 'JOIN'];
-            const firstWord = trimmedLine.split(' ')[0].toUpperCase();
+            const firstWord = trimmedLine.split(/\s+/)[0].toUpperCase();
+            
+            console.log('First word:', firstWord);
             
             if (!validStartKeywords.includes(firstWord)) {
+                console.log('Invalid keyword found:', firstWord);
                 diagnostics.push({
                     severity: 1, // Error
                     range: {
@@ -119,13 +189,15 @@ export class EchoQueryServer {
 
             // Check for INDEX statement format
             if (firstWord === 'INDEX') {
-                const parts = trimmedLine.split(' ');
-                if (parts.length < 2) {
+                const parts = trimmedLine.split(/\s+/).filter(part => part.length > 0);
+                console.log('INDEX parts:', parts);
+                if (parts.length < 2 || !parts[1]?.trim()) {
+                    console.log('Invalid INDEX format detected');
                     diagnostics.push({
                         severity: 1,
                         range: {
                             start: { line: lineIndex, character: 0 },
-                            end: { line: lineIndex, character: line.length }
+                            end: { line: lineIndex, character: trimmedLine.length || 5 } // Default to length of "INDEX" if line is empty
                         },
                         message: 'INDEX statement must be followed by an index name',
                         source: 'Echo Query'
@@ -141,11 +213,12 @@ export class EchoQueryServer {
                                    trimmedLine.includes('!=');
                 
                 if (!hasCondition) {
+                    console.log('Invalid FILTER format detected');
                     diagnostics.push({
                         severity: 1,
                         range: {
                             start: { line: lineIndex, character: 0 },
-                            end: { line: lineIndex, character: line.length }
+                            end: { line: lineIndex, character: trimmedLine.length }
                         },
                         message: 'FILTER must include a comparison operator (>, <, =, !=)',
                         source: 'Echo Query'
@@ -156,11 +229,12 @@ export class EchoQueryServer {
             // Check for MAP statement format
             if (firstWord === 'MAP') {
                 if (!trimmedLine.includes('AS') && !trimmedLine.includes('.')) {
+                    console.log('Invalid MAP format detected');
                     diagnostics.push({
                         severity: 2, // Warning
                         range: {
                             start: { line: lineIndex, character: 0 },
-                            end: { line: lineIndex, character: line.length }
+                            end: { line: lineIndex, character: trimmedLine.length }
                         },
                         message: 'MAP statement should typically include field paths (using dots) or AS keyword',
                         source: 'Echo Query'
@@ -171,11 +245,12 @@ export class EchoQueryServer {
             // Check for unmatched quotes
             const quoteCount = (trimmedLine.match(/"/g) || []).length;
             if (quoteCount % 2 !== 0) {
+                console.log('Unmatched quotes found');
                 diagnostics.push({
                     severity: 1,
                     range: {
                         start: { line: lineIndex, character: 0 },
-                        end: { line: lineIndex, character: line.length }
+                        end: { line: lineIndex, character: trimmedLine.length }
                     },
                     message: 'Unmatched quotes in line',
                     source: 'Echo Query'
@@ -183,10 +258,15 @@ export class EchoQueryServer {
             }
         });
 
-        this.connection.sendNotification('textDocument/publishDiagnostics', {
+        console.log('Final diagnostics:', diagnostics);
+        
+        // Send diagnostics notification
+        this.connection.sendDiagnostics({
             uri: textDocument.uri,
-            diagnostics
+            diagnostics: diagnostics
         });
+        
+        console.log('Sent diagnostics notification for:', textDocument.uri);
     }
 
     protected completion(params: TextDocumentPositionParams): CompletionList {
