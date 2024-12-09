@@ -23,46 +23,7 @@ export class EchoQueryServer {
         this.connection = connection;
         console.log('EchoQueryServer: Setting up document listener');
         
-        // Listen for document lifecycle events
-        connection.onDidOpenTextDocument((params) => {
-            console.log('Document opened:', params.textDocument.uri);
-            const document = TextDocument.create(
-                params.textDocument.uri,
-                params.textDocument.languageId,
-                params.textDocument.version,
-                params.textDocument.text
-            );
-            this.documents.set(document);
-            this.validate(document);
-        });
-
-        connection.onDidChangeTextDocument((params) => {
-            console.log('Document changed:', params.textDocument.uri);
-            console.log('Changes:', params.contentChanges);
-            const document = this.documents.get(params.textDocument.uri);
-            if (!document) {
-                console.log('Creating new document');
-                const newDocument = TextDocument.create(
-                    params.textDocument.uri,
-                    'echo-query',
-                    params.textDocument.version,
-                    params.contentChanges[0].text
-                );
-                this.documents.set(newDocument);
-                this.validate(newDocument);
-            } else {
-                console.log('Updating existing document');
-                const newDocument = TextDocument.create(
-                    document.uri,
-                    document.languageId,
-                    params.textDocument.version,
-                    params.contentChanges[0].text
-                );
-                this.documents.set(newDocument);
-                this.validate(newDocument);
-            }
-        });
-
+        // Set up the TextDocuments listener
         this.documents.listen(this.connection);
         
         this.documents.onDidChangeContent(change => {
